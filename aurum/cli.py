@@ -60,7 +60,8 @@ EXIT_UNAVAILABLE = 3
 EXIT_CONFIRM = 4
 
 _STAT_COLS = ["sharpe", "ci_lower", "ci_upper", "psr", "dsr", "cagr", "ann_vol", "max_drawdown",
-              "n_trades", "total_costs", "n_halt_episodes"]
+              "n_trades", "gross_pnl", "net_pnl", "total_costs", "break_even_cost_bps_per_side",
+              "break_even_round_trip_bps", "actual_cost_bps_per_side", "n_halt_episodes"]
 
 
 class CLIError(Exception):
@@ -162,6 +163,18 @@ def _utc(ts: str) -> Any:
 # ----------------------------------------------------------------------------------------
 # data
 # ----------------------------------------------------------------------------------------
+def cmd_data_binance(args: argparse.Namespace) -> int:
+    """Public S1 spot data only; this command never constructs a broker."""
+    from aurum.data.binance import load_binance_klines
+    from aurum.data.store import save_bars
+
+    bars = load_binance_klines(args.symbol, args.start, args.end, spread_bps=args.spread_bps)
+    path = save_bars(bars, args.out)
+    print(f"{args.symbol} S1: {len(bars)} completed trade-price candles -> {path}")
+    print(f"Assumed full spread: {args.spread_bps} bps; not measured bid/ask quotes.")
+    return EXIT_OK
+
+
 def cmd_data_download(args: argparse.Namespace) -> int:
     """Download Dukascopy bid/ask history and macro series into the data store (network)."""
     import datetime as dt
@@ -612,6 +625,7 @@ def cmd_desk_replay(args: argparse.Namespace) -> int:
                   initial_equity=b.initial_equity, stop_atr_mult=b.stop_atr_mult,
                   take_profit_atr_mult=b.take_profit_atr_mult, atr_period=b.atr_period,
                   stop_cooldown_bars=b.stop_cooldown_bars, event_horizon_hours=b.event_horizon_hours,
+                  exit_at_close=b.exit_at_close,
                   start=s0, end=s1)
     t0 = time.time()
     # hook at EVERY bar: the desk is consulted every `every` bars, its policy applied at each bar
@@ -903,6 +917,9 @@ def cmd_live_run(args: argparse.Namespace) -> int:
     import yaml
 
     cfg = _load_cfg(args)
+    if cfg.backtest.exit_at_close:
+        raise CLIError("exit_at_close is offline research only; the live runner cannot reproduce "
+                       "one-second close/re-entry fills. Use aurum backtest.", EXIT_USAGE)
     lv = cfg.live
     # the single research -> live translation (raises ConfigError, i.e. exit 2, on a sizer the
     # runner cannot reproduce or on live.options that try to override typed/safety fields)
@@ -988,6 +1005,13 @@ def build_parser() -> argparse.ArgumentParser:
     dl.add_argument("--macro-start", default="2011-01-01")
     dl.add_argument("--macro-cache", default="cache/macro")
     dl.set_defaults(func=cmd_data_download)
+    bn = dsub.add_parser("binance", help="public Binance 1s spot klines (no broker/API key)")
+    bn.add_argument("--symbol", default="BTCUSDT")
+    bn.add_argument("--start", required=True, help="UTC whole-second timestamp, inclusive")
+    bn.add_argument("--end", required=True, help="UTC whole-second timestamp, exclusive")
+    bn.add_argument("--spread-bps", type=float, default=1.0, help="assumed full spread, not measured")
+    bn.add_argument("--out", default="data_store/btcusdt_S1.parquet")
+    bn.set_defaults(func=cmd_data_binance)
     di = dsub.add_parser("info", help="summarise bar files and macro series")
     di.add_argument("--dir", default="data_store")
     _add_config(di, required=False)

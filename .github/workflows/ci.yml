@@ -21,6 +21,18 @@ env:
 # The suite never needs secrets, market data (data_store/, cache/ and runs/ are gitignored) or
 # the internet: tests/conftest.py refuses outbound connections outside @pytest.mark.network.
 jobs:
+  one-second-research:
+    name: independent S1 research arithmetic
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+      - name: Offline causality, chronological selection and cohort accounting
+        run: node --test tests/one_second_edge.test.cjs
+
   core:
     name: core · py${{ matrix.python-version }}
     runs-on: ubuntu-latest
@@ -55,6 +67,9 @@ jobs:
           aurum --help
           aurum strategies list
           aurum desk demo
+          aurum config validate --config configs/one_second.yaml
+      - name: One-second accounting and paper-only safety
+        run: python -m pytest tests/test_one_second.py tests/test_live_paper.py -q
       - name: Tests (offline, fast)
         run: python -m pytest -m "not network and not slow" -ra --durations=15
 

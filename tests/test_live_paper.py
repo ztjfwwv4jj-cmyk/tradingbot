@@ -58,12 +58,14 @@ def _reconcile_netting(pb: PaperBroker, clock: SimulatedClock, target: float, cu
 
 
 @pytest.mark.parametrize("stop", [None, 2.5])
-def test_paper_equals_simulator(stop: float | None) -> None:
+@pytest.mark.parametrize("fee_bps", [0.0, 10.0])
+def test_paper_equals_simulator(stop: float | None, fee_bps: float) -> None:
     """Same targets, same bars: identical equity at every decision, identical fill prices."""
     bars = _bars(400)
     rng = np.random.default_rng(11)
     targets = rng.choice([-2.0, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5], size=len(bars))
-    costs = CostModel(commission_per_lot=3.5, spread_multiplier=1.2, slippage_range_frac=0.05)
+    costs = CostModel(commission_per_lot=3.5, commission_bps=fee_bps,
+                      spread_multiplier=1.2, slippage_range_frac=0.05)
     sim = ExecutionSimulator(bars, costs=costs)
     pb, clock, _ = _broker(bars, costs=costs)
     sim_stop = None

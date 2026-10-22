@@ -48,6 +48,11 @@ Net of trading costs
     in these units) overrides the estimate; without any cost information the combiner
     scores GROSS streams and says so in ``explain()``.
 
+    With ``exit_at_close=True`` each nonzero forecast instead incurs ``2 * abs(f[t])``
+    turnover and earns the next bar's open-to-close return (no overnight gap). ``bars``
+    must then supply open prices. Unchanged forecasts are NOT free. Cost inputs still
+    use decision-bar prices as execution estimates, not guaranteed future fills.
+
 Weighting methods (all on the net streams when costs are known)
     * ``equal``          — 1/N (DeMiguel, Garlappi & Uppal, 2009: hard to beat out of sample).
     * ``inverse_vol``    — ``w_i ∝ 1 / std(u_i)``: naive risk parity.
@@ -308,29 +313,40 @@ class ForecastCombiner:
         return f, px, vol
 
     def unit_vol_streams(self, forecasts: pd.DataFrame, close: pd.Series, *,
-                         cost_per_turnover: pd.Series | float | None = None) -> pd.DataFrame:
+                         cost_per_turnover: pd.Series | float | None = None,
+                         exit_at_close: bool = False, bars: pd.DataFrame | None = None) -> pd.DataFrame:
         """``f_i[t] * r[t+1] / vol[t]`` on the rows of ``forecasts`` (warm-up/last row dropped),
         minus ``c_t * |f_i[t] - f_i[t-1]|`` when ``cost_per_turnover`` (``c_t``, unit-vol units)
         is given.
 
         ``close`` is restricted to ``forecasts.index`` so no price after the last forecast row
-        is ever used.
+        is ever used. ``exit_at_close`` requires ``bars`` for next-open-to-close labels and
+        charges two sides of ``abs(f[t])`` per candle, including unchanged forecasts.
         """
-        gross, net, _ = self._streams(forecasts, close, self._as_cost_series(cost_per_turnover, forecasts.index))
+        gross, net, _ = self._streams(forecasts, close, self._as_cost_series(cost_per_turnover, forecasts.index),
+                                      exit_at_close=exit_at_close, bars=bars)
         return gross if net is None else net
 
-    def _streams(self, forecasts: pd.DataFrame, close: pd.Series, cost: pd.Series | None
+    def _streams(self, forecasts: pd.DataFrame, close: pd.Series, cost: pd.Series | None, *,
+                 exit_at_close: bool = False, bars: pd.DataFrame | None = None
                  ) -> tuple[pd.DataFrame, pd.DataFrame | None, pd.DataFrame | None]:
         """(gross streams, net streams or None, turnover |Δf| or None) on the valid rows."""
         f, px, vol = self._checked(forecasts, close)
         fwd = np.log(px).diff().shift(-1)  # r[t+1] within the given window only; last row -> NaN
+        if exit_at_close:
+            if bars is None or "open" not in bars:
+                raise ValueError("exit_at_close combiner fitting requires bars with open prices")
+            opens = bars["open"].reindex(f.index).astype(float)
+            if not np.isfinite(opens).all() or (opens <= 0).any():
+                raise ValueError("exit_at_close needs positive finite opens on every forecast row")
+            fwd = np.log(px / opens).shift(-1)
         scale = fwd / vol
         valid = scale.notna() & np.isfinite(scale) & (vol > 0)
         gross = f.loc[valid].mul(scale.loc[valid], axis=0)
         if cost is None:
             return gross, None, None
         # |f[t] - f[t-1]| within the window (the first row has no previous forecast: 0)
-        turnover = f.diff().abs().fillna(0.0).loc[valid]
+        turnover = (2 * f.abs() if exit_at_close else f.diff().abs().fillna(0.0)).loc[valid]
         c = cost.reindex(f.index).loc[valid]
         if c.isna().any():
             # rows without a cost estimate are charged the window's median (never zero-cost)
@@ -387,7 +403,8 @@ class ForecastCombiner:
         r = rng.to_numpy(dtype=float)
         r = np.where(np.isfinite(r) & (r >= 0), r, 0.0)
         slip = float(cm.slippage_fixed) + float(cm.slippage_range_frac) * r
-        comm = float(cm.commission(1.0, instrument=inst)) / float(inst.contract_size)
+        fixed_comm = cm.commission_per_lot if cm.commission_per_lot is not None else inst.commission_per_lot
+        comm = fixed_comm / float(inst.contract_size) + px.to_numpy() * cm.commission_bps / 10_000
         k = 0.5 * eff + slip + comm                                  # USD/oz per fill
         with np.errstate(invalid="ignore", divide="ignore"):
             c = k / (px.to_numpy() * vol.to_numpy())
@@ -396,13 +413,15 @@ class ForecastCombiner:
 
     def fit(self, forecasts: pd.DataFrame, close: pd.Series, *, bars: pd.DataFrame | None = None,
             spread: pd.Series | None = None, costs: Any = None, instrument: Any = None,
-            cost_per_turnover: pd.Series | float | None = None) -> ForecastCombiner:
+            cost_per_turnover: pd.Series | float | None = None, exit_at_close: bool = False) -> ForecastCombiner:
         """Learn weights and FDM from TRAINING forecasts and the matching close prices.
 
         Cost information (optional, all restricted to the forecasts' index): ``bars`` or
         ``spread`` with the ``costs`` model/``instrument`` -> estimated ``c_t``; or an explicit
         ``cost_per_turnover`` (scalar or series in unit-vol units per unit of |Δforecast|),
         which takes precedence. Without any, streams are scored gross (noted).
+        ``exit_at_close`` estimates a fresh two-sided round trip per nonzero forecast
+        and uses open-to-close training labels; otherwise held-position semantics remain.
         """
         cols = [str(c) for c in forecasts.columns] if isinstance(forecasts, pd.DataFrame) else []
         if len(set(cols)) != len(cols):
@@ -418,7 +437,9 @@ class ForecastCombiner:
         else:
             cost = None
             basis = "gross (no cost information passed to fit)"
-        gross, net, turnover = self._streams(forecasts, close, cost)
+        if exit_at_close:
+            basis += "; forced candle round trips (2*abs(forecast))"
+        gross, net, turnover = self._streams(forecasts, close, cost, exit_at_close=exit_at_close, bars=bars)
         streams = gross if net is None else net
         n_obs = len(streams)
         if n_obs < 30:

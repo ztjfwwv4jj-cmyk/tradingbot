@@ -383,6 +383,7 @@ class CostsConfig:
     slippage_range_frac: float = 0.02
     impact_coef: float = 0.0
     commission_per_lot: float | None = None
+    commission_bps: float = 0.0
     financing: FinancingConfig = field(default_factory=FinancingConfig)
 
     def build(self) -> Any:
@@ -537,6 +538,7 @@ class BacktestConfig:
     take_profit_atr_mult: float | None = None
     atr_period: int = 14
     stop_cooldown_bars: int = 0
+    exit_at_close: bool = False
     event_horizon_hours: float = 24.0
     start: str | None = None               # trading window (inputs are warmed up before it)
     end: str | None = None
@@ -1246,6 +1248,9 @@ def _semantic_problems(cfg: AurumConfig) -> list[str]:
         _try(p, f"risk.{mode}", lambda m=mode: _limits_with_help(cfg.risk, m))
 
     b = cfg.backtest
+    if b.exit_at_close and (cfg.live.broker != "paper" or cfg.live.allow_live_real or not cfg.live.dry_run):
+        p.append("backtest.exit_at_close is offline research only; live must remain paper, dry_run, "
+                 "and allow_live_real=false")
     if not (b.initial_equity > 0):
         p.append("backtest.initial_equity must be positive")
     for name in ("stop_atr_mult", "take_profit_atr_mult"):

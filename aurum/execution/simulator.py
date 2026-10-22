@@ -389,6 +389,7 @@ class ExecutionSimulator:
         reason: str = "signal",
         stop_distance: float | None = None,
         take_profit_distance: float | None = None,
+        exit_at_close: bool = False,
     ) -> StepResult:
         """Trade to ``target_lots`` at the next open and settle the next bar.
 
@@ -408,6 +409,11 @@ class ExecutionSimulator:
         order has filled at that open, so no decision uses it. The resolved levels are
         returned in ``StepResult.stop_price`` / ``take_profit`` so the caller can keep them
         fixed on later steps. Passing both a level and a distance for the same order raises.
+
+        ``exit_at_close=True`` closes any remaining position at the next bar's close,
+        charging a second market fill. Each nonzero approved target is then a fresh
+        one-bar round trip, even if its direction is unchanged. This is an offline
+        execution assumption, not a guarantee of a fill at the observed candle close.
         """
         if self.done:
             raise RuntimeError("simulation finished (no next bar); call reset()")
@@ -507,6 +513,15 @@ class ExecutionSimulator:
                 swap += x
                 tr.swap += x
 
+        if exit_at_close and pos != 0.0:
+            a, b, d, f = self._execute(i, -pos, c, spr, rng, "bar_close", "bar_close", limit=False)
+            c_spread += a
+            c_slip += b
+            c_comm += d
+            fills.append(f)
+            pos = self.position
+            exit_reason = "bar_close"
+
         net = price_pnl - c_spread - c_slip - c_comm + swap
         prev_eq = self.equity
         self.equity = prev_eq + net
@@ -553,7 +568,7 @@ class ExecutionSimulator:
         side = 1 if qty > 0 else -1
         q = abs(qty)
         fp = self.costs.fill_price(side, mid, spr, rng, q, instrument=inst, limit=limit)
-        comm = self.costs.commission(q, instrument=inst)
+        comm = self.costs.commission(q, instrument=inst, price=fp.price)
         cost = fp.spread_cost + fp.slippage_cost + comm
         pos_before = self.position
         pos_after = round(pos_before + qty, 8)
@@ -561,7 +576,7 @@ class ExecutionSimulator:
             pos_after = 0.0
         self._book_trade(i, pos_before, side, q, fp.price, cost, reason, intrabar=(kind != "open"))
         self.position = pos_after
-        time = self._times[i]
+        time = self._avail[i] if kind == "bar_close" else self._times[i]
         self._fills.append((time, i, side, q, fp.price, mid, fp.spread_cost, fp.slippage_cost,
                             comm, kind, reason, pos_after))
         fill = Fill(client_id=f"sim-{i}-{kind}", symbol=inst.symbol, side=Side(side), lots=q,
@@ -594,7 +609,8 @@ class ExecutionSimulator:
         tr.costs += c_close
         if held - close_q < _EPS:  # flat (or reversed): the round trip is complete
             bars_held = i - tr.entry_bar + (1 if intrabar else 0)
-            self._closed.append(tr.row(time, i, bars_held, reason))
+            exit_time = self._avail[i] if reason == "bar_close" else time
+            self._closed.append(tr.row(exit_time, i, bars_held, reason))
             self._trade = None
             if open_q > 0.0:
                 self._trade = _OpenTrade(side=side, entry_time=time, entry_bar=i,

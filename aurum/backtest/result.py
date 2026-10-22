@@ -45,6 +45,31 @@ class BacktestResult:
     pnl: pd.DataFrame | None = None
     position_close: pd.Series | None = None
 
+    def cost_attribution(self) -> dict[str, float]:
+        """USD PnL and cost budget for the executed path, not a zero-cost counterfactual.
+
+        Break-even bps = (mid-price PnL + financing) / executed one-way notional * 1e4.
+        Negative values mean there was no nonnegative cost budget. With no fills it is NaN.
+        The round-trip equivalent is twice the per-side budget, not a per-trade average.
+        """
+        rec = {k: float(self.costs[k].sum()) if k in self.costs.columns else 0.0
+               for k in ("spread", "slippage", "commission", "swap")}
+        total = rec["spread"] + rec["slippage"] + rec["commission"]
+        gross = float(self.pnl["price"].sum()) if self.pnl is not None else float("nan")
+        net = float(self.equity.iloc[-1] - self.equity.iloc[0]) if len(self.equity) else 0.0
+        notional = 0.0
+        if len(self.fills) and {"lots", "price"} <= set(self.fills.columns):
+            notional = float((self.fills["lots"].abs() * self.fills["price"]).sum()
+                             * self.meta.get("contract_size", float("nan")))
+        budget = (gross + rec["swap"]) / notional * 10_000 if notional > 0 else float("nan")
+        rec.update({"total_costs": total, "gross_pnl": gross, "net_pnl": net,
+                    "costs_pct_gross": total / abs(gross) if gross else float("nan"),
+                    "traded_notional": notional,
+                    "break_even_cost_bps_per_side": budget,
+                    "break_even_round_trip_bps": 2 * budget,
+                    "actual_cost_bps_per_side": total / notional * 10_000 if notional > 0 else float("nan")})
+        return rec
+
     def reconcile(self) -> dict[str, float]:
         """PnL identity check: equity change vs. sum of price PnL, costs and swap.
 
@@ -69,7 +94,8 @@ class BacktestResult:
     def summary(self) -> str:
         keys = [
             "total_return", "cagr", "ann_vol", "sharpe", "sortino", "max_drawdown", "calmar",
-            "n_trades", "win_rate", "profit_factor", "exposure", "total_costs",
+            "n_trades", "win_rate", "profit_factor", "exposure", "gross_pnl", "net_pnl", "total_costs",
+            "break_even_cost_bps_per_side", "break_even_round_trip_bps", "actual_cost_bps_per_side",
         ]
         lines = []
         for k in keys:

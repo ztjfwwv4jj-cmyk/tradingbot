@@ -140,7 +140,7 @@ class ReplayFeed:
         tf = timeframe or bars.attrs.get("timeframe")
         if tf is None:
             minutes = index_bar_minutes(pd.DatetimeIndex(bars.index))
-            tf = next((t.name for t in map(get_timeframe, ("M1", "M5", "M15", "M30", "H1", "H4", "D1"))
+            tf = next((t.name for t in map(get_timeframe, ("S1", "M1", "M5", "M15", "M30", "H1", "H4", "D1"))
                        if t.minutes == minutes), None)
             if tf is None:
                 raise ValueError(f"cannot infer a timeframe from a {minutes}-minute spacing")
@@ -530,7 +530,7 @@ class PaperBroker:
         sign = 1.0 if p.lots > 0 else -1.0
         pnl = sign * qty * cs * (price - p.price_open)
         swap = p.swap * frac
-        comm = self.costs.commission(qty, instrument=self.instrument) if commission is None else commission
+        comm = self.costs.commission(qty, instrument=self.instrument, price=price) if commission is None else commission
         self.balance += pnl + swap - comm
         p.swap -= swap
         remaining = round(vol - qty, 8)
@@ -690,7 +690,7 @@ class PaperBroker:
                                     f"insufficient margin: need {used + add:,.2f}, equity {eq:,.2f}")
 
         fp = self.costs.fill_price(req.side, q.mid, q.spread, q.bar_range, req.lots, instrument=self.instrument)
-        comm = self.costs.commission(req.lots, instrument=self.instrument)
+        comm = self.costs.commission(req.lots, instrument=self.instrument, price=fp.price)
         t_ns = _ns(now)
         side_sign = float(int(req.side))
         sl = req.stop_loss
