@@ -26,6 +26,7 @@ _EXPORTS: dict[str, str] = {
     "save_frame": "aurum.data.store",
     "frame_hash": "aurum.data.store",
     "load_csv": "aurum.data.loaders",
+    "load_binance_klines": "aurum.data.binance",
     "load_mt5_csv": "aurum.data.loaders",
     "bars_from_ohlc": "aurum.data.loaders",
     "quality_report": "aurum.data.loaders",

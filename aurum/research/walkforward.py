@@ -315,6 +315,7 @@ class _BookSpec:
     take_profit_atr_mult: float | None
     atr_period: int
     stop_cooldown_bars: int
+    exit_at_close: bool
     event_horizon_hours: float
 
 
@@ -452,6 +453,7 @@ def _book_task(name: str, phase: str, forecast: pd.Series | None, start: pd.Time
                            costs=spec.costs, initial_equity=spec.initial_equity,
                            stop_atr_mult=spec.stop_atr_mult, take_profit_atr_mult=spec.take_profit_atr_mult,
                            atr_period=spec.atr_period, stop_cooldown_bars=spec.stop_cooldown_bars,
+                           exit_at_close=spec.exit_at_close,
                            event_horizon_hours=spec.event_horizon_hours, start=start, end=end)
     res.meta["book"] = name
     res.meta["phase"] = phase
@@ -638,6 +640,10 @@ def book_statistics(result: BacktestResult, *, n_trials: int = 1, trial_sharpes:
         "exposure": m.get("exposure"), "turnover_lots_per_year": m.get("turnover_lots_per_year"),
         "total_costs": m.get("total_costs"), "cost_drag_ann": m.get("cost_drag_ann"),
         "swap_total": m.get("swap_total"),
+        "gross_pnl": m.get("gross_pnl"), "net_pnl": m.get("net_pnl"),
+        "break_even_cost_bps_per_side": m.get("break_even_cost_bps_per_side"),
+        "break_even_round_trip_bps": m.get("break_even_round_trip_bps"),
+        "actual_cost_bps_per_side": m.get("actual_cost_bps_per_side"),
         "n_risk_events": 0 if ev is None else len(ev),
         "n_halt_bars": 0 if ev is None or ev.empty else int(ev["halted"].astype(bool).sum()),
         "n_halt_episodes": _halt_episodes(result),
@@ -648,14 +654,7 @@ def book_statistics(result: BacktestResult, *, n_trials: int = 1, trial_sharpes:
 
 def cost_attribution(result: BacktestResult) -> dict[str, float]:
     """Gross (mid-price) PnL vs spread, slippage, commission and swap (USD)."""
-    c = result.costs
-    rec = {k: float(c[k].sum()) if k in c.columns else 0.0 for k in ("spread", "slippage", "commission", "swap")}
-    total = rec["spread"] + rec["slippage"] + rec["commission"]
-    gross = float(result.pnl["price"].sum()) if result.pnl is not None and "price" in result.pnl else math.nan
-    net = float(result.equity.iloc[-1] - result.equity.iloc[0]) if len(result.equity) else 0.0
-    rec.update({"total_costs": total, "gross_pnl": gross, "net_pnl": net,
-                "costs_pct_gross": total / abs(gross) if gross and math.isfinite(gross) else math.nan})
-    return rec
+    return result.cost_attribution()
 
 
 def _window_sharpe(equity: pd.Series, t0: pd.Timestamp, t1: pd.Timestamp) -> tuple[float, float]:
@@ -1021,7 +1020,8 @@ def _book_spec(cfg: AurumConfig) -> _BookSpec:
                      instrument=cfg.instrument.build(), costs=cfg.costs.build(),
                      initial_equity=b.initial_equity, stop_atr_mult=b.stop_atr_mult,
                      take_profit_atr_mult=b.take_profit_atr_mult, atr_period=b.atr_period,
-                     stop_cooldown_bars=b.stop_cooldown_bars, event_horizon_hours=b.event_horizon_hours)
+                     stop_cooldown_bars=b.stop_cooldown_bars, event_horizon_hours=b.event_horizon_hours,
+                     exit_at_close=b.exit_at_close)
 
 
 def _unique_keys(strategies: Sequence[Strategy]) -> dict[str, Strategy]:

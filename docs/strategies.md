@@ -1,9 +1,10 @@
 # Strategies
 
 A strategy (an "alpha model") turns point-in-time market data into a **forecast**: one
-number per bar in `[-1, 1]`, decided at the close of that bar. Aurum registers 15
-strategies. Twelve are described on this page: 11 fixed rules and the learned
-`intraday_seasonality`. `ml_gbm`, `meta_label` and `rl_ppo` have their own page
+number per bar in `[-1, 1]`, decided at the close of that bar. Aurum registers 16
+strategies. Thirteen are described on this page: 11 general-timeframe fixed rules, the
+S1-only `one_second` experiment and the learned `intraday_seasonality`.
+`ml_gbm`, `meta_label` and `rl_ppo` have their own page
 ([ml-and-rl.md](ml-and-rl.md)). A forecast is a statement of conviction, not a position
 size. The combiner, the volatility-targeting sizer and the risk manager downstream
 ([portfolio-and-risk.md](portfolio-and-risk.md)) turn it into lots. This page covers the
@@ -22,12 +23,142 @@ rationales below is evidence that a rule works on gold. The out-of-sample eviden
 - [Breakout](#breakout): `vol_squeeze`, `orb`
 - [Macro](#macro): `macro_factor`, `risk_off`
 - [Learned seasonality](#learned-seasonality-intraday_seasonality): `intraday_seasonality`
+- [One-second experiment](#one-second-experiment): `one_second`
 - [Which configuration runs which strategy](#which-configuration-runs-which-strategy)
 - [Configuring strategies in YAML](#configuring-strategies-in-yaml)
 - [Writing and registering a custom strategy](#writing-and-registering-a-custom-strategy)
 - [Evidence](#evidence)
 
 ---
+
+## One-second experiment
+
+`one_second` tests a hypothesis, not a profitable trading system. Its default
+`mode: momentum` forecasts the sign of the last completed close-to-close price change.
+The forecast at close `t` is executed at open `t+1`; do **not** shift the forecast again.
+`mode: reversion` negates it. `flat_on_zero: true` abstains after zero returns; with
+`false`, the last nonzero direction is carried (initially long for momentum, short for
+reversion). The first bar is always warm-up and flat. Input must be **contiguous, completed
+S1 bars**; split at outages or market closures rather than interpreting a multi-minute
+change as a one-second return.
+
+Use `configs/one_second.yaml` for offline BTCUSDT research, not XAUUSD execution:
+
+```powershell
+python -m aurum data binance --symbol BTCUSDT --start "2026-10-20T12:00:00Z" --end "2026-10-20T13:00:00Z" --out data_store\btcusdt_S1.parquet
+python -m aurum backtest --config configs\one_second.yaml --no-tearsheet
+```
+
+Download bounds are UTC `[start, end)`, aligned to seconds; unfinished candles are
+excluded. The public endpoint needs no key. HTTP failures are raised, missing bars are
+warned about and **not filled**. Binance OHLC are trade prices, used only as a mid-price
+proxy; `--spread-bps 1` is an assumed full spread, not measured bid/ask data. Spot short
+signals are hypothetical: the simulator does not establish borrow availability, shorting
+permission or funding. These are not gold bars, and crypto evidence cannot establish a
+gold edge. The existing data layer supports bar aggregation, not raw tick ingestion:
+use `load_csv(..., "S1", default_spread=...)` for genuine broker S1 bars, or aggregate
+timestamped bid/ask ticks outside this loader first. Minute bars cannot be upsampled to S1.
+
+The sample sets `backtest.exit_at_close: true`: every approved nonzero forecast opens a
+fresh position at the next open and exits at that candle's close, paying **both** sides.
+This also re-enters unchanged directions. `flat_on_zero: false` requests a position on
+every candle after warm-up, but rounding, risk limits and daily-loss halts may still veto
+it. With the default `exit_at_close: false`, ordinary strategies retain their existing
+position-target semantics. This one-bar mode is offline only: the live command refuses
+it instead of pretending the paper/live runner can guarantee a candle-close fill.
+The sample remains `broker: paper`, `dry_run: true`, `allow_live_real: false`.
+No MT5 connection, login or order is needed.
+
+The sample assumes 10 bps commission **per side**, a $0.50 per-unit slippage floor plus
+2% of execution-bar range, and the downloaded spread. These are stress assumptions,
+not current venue quotes. `costs.commission_bps` charges actual executed notional and
+is **added** to any fixed per-lot commission. Financing is disabled for the crypto
+experiment, not silently modelled as gold CFD carry. For gold research, supply genuine
+gold S1 bid/ask data, XAUUSD contract specifications, broker commissions and financing.
+
+Backtest console output, saved metrics and research summaries include:
+
+| Field | Interpretation |
+|---|---|
+| `gross_pnl` | Mid-proxy price PnL in account currency on the **executed** position path, before costs and financing. |
+| `net_pnl` | Equity change after spread, slippage, commissions and signed financing. |
+| `break_even_cost_bps_per_side` | `(gross_pnl + swap) / traded_notional * 10,000`; executed one-way notional includes entries **and** exits. |
+| `break_even_round_trip_bps` | Twice that per-side budget; a round-trip equivalent, not a per-trade average. |
+| `actual_cost_bps_per_side` | Actual spread + slippage + commissions divided by the same one-way notional, in bps. |
+
+Negative break-even means there is no nonnegative cost budget; with no fills the budget
+is NaN (undefined), not zero. Gross here is not a separately resized frictionless strategy:
+net losses can change sizing or trigger risk halts. A short S1 sample cannot support
+annualised performance claims, and daily Sharpe is undefined with fewer than two days.
+Latency, queue priority, maker rebates, partial fills and executable liquidity are not
+modelled. Positive lag autocorrelation or directional accuracy alone does not demonstrate
+positive next-open-to-close PnL after costs.
+
+The initial exploratory BTC sample supplied during development suggested only about
+0.16 bps gross per round trip before realistic costs. That is an unverified exploratory
+observation, not an out-of-sample guarantee. Chrome DevTools could not run because Chrome
+was not installed; direct public klines were used instead. DC Hub supplies data-center
+and power-industry information, not one-second tradable price/quote data, and is not an
+input to this signal.
+
+### Expanded public-data check (2026-10-22)
+
+Nine disjoint symbol/hour datasets (32,400 candles) were fetched from the public
+[Binance klines endpoint](https://data-api.binance.vision/api/v3/klines) at
+`interval=1s`, in pages of at most 1,000 candles. The exchange clock fixed the latest
+complete-hour endpoint at **2026-10-22 18:00 UTC**. The other endpoints were one and seven
+days earlier, all covering **17:00-18:00 UTC**, not cherry-picked best hours.
+The following descriptive next-open-to-close momentum results use `flat_on_zero=true`,
+one base unit per trade and a fresh exit/re-entry each candle:
+
+| Symbol | Date (UTC) | Trades | Nonzero outcomes scored | Direction accuracy | Gross round-trip budget (bps) | With one extra second delay (bps) |
+|---|---|---:|---:|---:|---:|---:|
+| BTCUSDT | 2026-10-22 | 1,867 | 849 | 65.7% | 0.1022 | 0.0738 |
+| BTCUSDT | 2026-10-21 | 1,636 | 590 | 59.8% | 0.0427 | 0.0306 |
+| BTCUSDT | 2026-10-15 | 1,822 | 818 | 64.9% | 0.0922 | 0.0554 |
+| ETHUSDT | 2026-10-22 | 1,906 | 892 | 71.9% | 0.2010 | 0.0812 |
+| ETHUSDT | 2026-10-21 | 1,894 | 773 | 68.4% | 0.1338 | 0.0598 |
+| ETHUSDT | 2026-10-15 | 1,817 | 856 | 71.5% | 0.1588 | 0.0891 |
+| SOLUSDT | 2026-10-22 | 1,316 | 295 | 67.8% | 0.1040 | 0.0344 |
+| SOLUSDT | 2026-10-21 | 1,378 | 278 | 59.7% | 0.0509 | 0.0335 |
+| SOLUSDT | 2026-10-15 | 1,372 | 320 | 53.1% | 0.0323 | 0.0302 |
+
+Accuracy excludes both abstentions and zero next-candle open-to-close moves, so it is
+**not** accuracy on every candle. About 58-67% of BTC candles, 59-61% of ETH candles and
+78-80% of SOL candles had zero open-to-close movement. The all-long baseline on the same
+scored subsets was 45-53%, but magnitude and execution costs matter much more than that
+hit-rate comparison. BTC close-to-close lag-1 autocorrelation was 0.100-0.206; ETH was
+0.063-0.193; SOL ranged from -0.038 to 0.076. Positive autocorrelation is not a stable
+cross-market property.
+
+The complete sweep was **216 offline scenarios**: 3 symbols x 3 hours x 2 directions
+(momentum/reversion) x 2 zero policies x 2 execution delays x 3 fees (0, 1, 10 bps/side).
+All scenarios assumed a **1 bp full spread**, slippage of **0.1 bp of the window's first
+open per side plus 2% of each execution bar's high-low range**, no financing and hypothetical
+short availability. Fees were applied to entry and exit executed notionals. **None was
+net-positive, even with zero commission**: spread and slippage alone cost approximately
+1.20-1.22 bps per round trip, versus the default momentum budgets above of 0.032-0.201 bps.
+At 10 bps/side, total costs were approximately 21.20-21.22 bps per round trip. For example,
+the latest BTC hour earned $1,551.52 gross but lost $320,341.12 net at one BTC per trade;
+these are fixed-unit turnover sums, not portfolio returns or suggested position sizes.
+ETH earned $91.24 gross and lost $9,536.83 net at one ETH per trade.
+
+Forcing exposure through zero signals (`flat_on_zero=false`) made 3,598 trades per
+3,600-candle window and reduced the momentum gross budget to 0.029-0.131 bps. Reversion
+had negative gross PnL in all nine windows under both zero policies and both delays.
+The extra-second delay is only a sensitivity proxy, not a realistic calibrated latency
+simulation. A 60-second non-overlapping block bootstrap (1,000 replicates) gave unadjusted
+95% intervals of [0.078, 0.126] bps for the latest BTC gross round-trip budget and
+[0.171, 0.232] for ETH. The older SOL interval [-0.024, 0.094] included zero.
+These are short, dependent exploratory samples with many comparisons, not corrected
+significance tests, durable market trends or out-of-sample validation.
+
+Raw public responses and SHA-256 hashes were retained in the development session.
+Reproduce a window with `aurum data binance` using the exact UTC boundaries above.
+The expanded calculations were run in Node because Windows Application Control blocked
+the local pandas binaries; they are an independent arithmetic study, **not a claim that
+the Python simulator was locally executed**. The Python implementation has separate
+deterministic accounting and causality tests.
 
 ## The forecast contract
 

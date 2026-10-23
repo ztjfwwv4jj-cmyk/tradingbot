@@ -387,7 +387,8 @@ class ForecastCombiner:
         r = rng.to_numpy(dtype=float)
         r = np.where(np.isfinite(r) & (r >= 0), r, 0.0)
         slip = float(cm.slippage_fixed) + float(cm.slippage_range_frac) * r
-        comm = float(cm.commission(1.0, instrument=inst)) / float(inst.contract_size)
+        fixed_comm = cm.commission_per_lot if cm.commission_per_lot is not None else inst.commission_per_lot
+        comm = fixed_comm / float(inst.contract_size) + px.to_numpy() * cm.commission_bps / 10_000
         k = 0.5 * eff + slip + comm                                  # USD/oz per fill
         with np.errstate(invalid="ignore", divide="ignore"):
             c = k / (px.to_numpy() * vol.to_numpy())

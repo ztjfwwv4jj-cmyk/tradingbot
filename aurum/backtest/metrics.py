@@ -273,7 +273,9 @@ def compute_metrics(
     # --- returns / risk ---------------------------------------------------------------------
     total_return = final / initial - 1.0 if initial else _NAN
     if math.isfinite(years) and years > 0 and initial > 0:
-        cagr = (final / initial) ** (1.0 / years) - 1.0 if final > 0 else -1.0
+        # Tiny S1 windows can overflow annualisation; retain inf instead of crashing.
+        with np.errstate(over="ignore", invalid="ignore"):
+            cagr = float(np.expm1(np.log(final / initial) / years)) if final > 0 else -1.0
     else:
         cagr = _NAN
     dur = _as_duration(bar_duration)
@@ -384,4 +386,9 @@ def compute_metrics(
     out["years"] = _f(years)
     out["bars_per_year"] = _f(bpy) if bpy else _NAN
     out["final_equity"] = final
+    if isinstance(result_or_returns, BacktestResult):
+        attribution = result_or_returns.cost_attribution()
+        for key in ("gross_pnl", "net_pnl", "traded_notional", "break_even_cost_bps_per_side",
+                    "break_even_round_trip_bps", "actual_cost_bps_per_side"):
+            out[key] = attribution[key]
     return out

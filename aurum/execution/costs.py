@@ -450,6 +450,7 @@ class CostModel:
     slippage_range_frac : fraction of the execution bar's high-low range added as slippage.
     impact_coef       : square-root impact coefficient, USD/oz per sqrt(lot).
     commission_per_lot : USD per lot per side; ``None`` uses ``instrument.commission_per_lot``.
+    commission_bps     : additional fee in basis points of executed notional, per side.
     financing         : :class:`FinancingModel` (a kwargs mapping or a mode name is accepted,
                         e.g. from YAML); default: rate-based financing.
     """
@@ -461,10 +462,11 @@ class CostModel:
     impact_coef: float = 0.0
     commission_per_lot: float | None = None
     financing: FinancingModel = field(default_factory=FinancingModel)
+    commission_bps: float = 0.0
 
     def __post_init__(self) -> None:
         for name in ("spread_multiplier", "min_spread", "slippage_fixed", "slippage_range_frac",
-                     "impact_coef"):
+                     "impact_coef", "commission_bps"):
             v = getattr(self, name)
             if not (math.isfinite(v) and v >= 0):
                 raise ValueError(f"CostModel.{name} must be finite and >= 0, got {v!r}")
@@ -531,10 +533,16 @@ class CostModel:
         cs = instrument.contract_size
         return FillPrice(price, half * q * cs, slip * q * cs)
 
-    def commission(self, lots: float, *, instrument: Instrument = XAUUSD) -> float:
-        """Commission in USD (>= 0) for one side of ``|lots|``."""
+    def commission(self, lots: float, *, instrument: Instrument = XAUUSD,
+                   price: float | None = None) -> float:
+        """Per-side fixed commission PLUS ``commission_bps`` of executed notional."""
         rate = self.commission_per_lot if self.commission_per_lot is not None else instrument.commission_per_lot
-        return abs(float(lots)) * float(rate)
+        fee = abs(float(lots)) * float(rate)
+        if self.commission_bps:
+            if price is None or not math.isfinite(price) or price <= 0:
+                raise ValueError("commission_bps requires a positive finite execution price")
+            fee += abs(instrument.notional(lots, price)) * self.commission_bps / 10_000
+        return fee
 
     def swap(self, lots: float, nights: float, *, instrument: Instrument = XAUUSD,
              price: float | None = None, rate_nights: float | None = None) -> float:
@@ -564,12 +572,12 @@ class CostModel:
 
     # ---- convenience ------------------------------------------------------------------------
     def round_trip_cost(self, lots: float, spread: float, bar_range: float = 0.0, *,
-                        instrument: Instrument = XAUUSD) -> float:
+                        instrument: Instrument = XAUUSD, price: float | None = None) -> float:
         """Estimated USD cost of opening and closing ``|lots|`` (market orders both ways),
         excluding swap. Useful for sizers, turnover filters and the LLM execution trader."""
         q = abs(float(lots))
         per_side = (0.5 * self.effective_spread(spread) + self.slippage(bar_range, q)) * q * instrument.contract_size
-        return 2.0 * (per_side + self.commission(q, instrument=instrument))
+        return 2.0 * (per_side + self.commission(q, instrument=instrument, price=price))
 
 
 # ---- rollover calendar ------------------------------------------------------------------------

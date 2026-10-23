@@ -1,0 +1,56 @@
+# Offline/paper research ONLY. BTC spot trade prices are not a gold or executable quote feed.
+extends: default.yaml
+name: one_second
+data:
+  symbol: BTCUSDT
+  timeframe: S1
+  start: null
+  end: null
+  macro: false
+  events: none
+instrument:
+  symbol: BTCUSDT
+  contract_size: 1.0
+  tick_size: 0.01
+  lot_step: 0.00001
+  min_lot: 0.00001
+  max_lot: 1.0
+  margin_rate: 1.0
+costs:
+  min_spread: 0.0
+  slippage_fixed: 0.50
+  slippage_range_frac: 0.02
+  commission_per_lot: 0.0
+  commission_bps: 10.0  # per side on executed notional; assumption, not a venue fee quote
+  financing: {mode: none}
+strategies:
+  - name: one_second
+    params: {mode: momentum, flat_on_zero: true}
+combiner:
+  method: equal
+  max_weight: 1.0
+  fdm_cap: 1.0
+sizing:
+  max_leverage: 1.0
+  rebalance_band: 0.0
+risk:
+  research:
+    max_leverage: 1.0
+    max_spread: 100.0
+backtest:
+  exit_at_close: true
+  benchmark: false
+walkforward:
+  train: 300
+  test: 300
+  min_train_bars: 100
+  embargo: 1
+  holdout_start: null
+  n_trials: 1
+  n_boot: 100
+live:
+  broker: paper
+  dry_run: true
+  allow_live_real: false
+output:
+  dir: runs/one_second

@@ -16,7 +16,7 @@ import pandas as pd
 class Timeframe:
     name: str          # "M1", "M5", "M15", "M30", "H1", "H4", "D1"
     freq: str          # pandas offset alias usable with resample(), e.g. "5min", "1h", "1D"
-    minutes: int
+    minutes: float
 
     @property
     def delta(self) -> pd.Timedelta:
@@ -27,6 +27,7 @@ class Timeframe:
 
 
 _TIMEFRAMES = {
+    "S1": Timeframe("S1", "1s", 1 / 60),
     "M1": Timeframe("M1", "1min", 1),
     "M5": Timeframe("M5", "5min", 5),
     "M15": Timeframe("M15", "15min", 15),

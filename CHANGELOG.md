@@ -6,6 +6,27 @@ All notable changes to this project are recorded here. The format follows
 commits and data hashes rather than to version numbers: see
 [docs/RESULTS.md](docs/RESULTS.md) and each run's `provenance.json`.
 
+## [Unreleased]
+
+### Added
+
+- S1 timeframe and registered `one_second` momentum/reversion experiment with explicit
+  zero-return policy, one-bar warm-up and contiguous-data checks. Public paginated Binance
+  spot 1s loader and `aurum data binance` preserve provenance, exclude unfinished bars and
+  distinguish assumed spread/trade-price proxies from executable quotes.
+- Opt-in offline `backtest.exit_at_close` round trips that re-enter on every approved
+  nonzero candle and pay entry and exit costs, including terminal exits. Existing
+  position-holding behavior is unchanged. The supplied configuration is paper/dry-run
+  only and the live command refuses this unsupported execution mode.
+- Per-side notional-bps commissions shared by simulator, paper broker and combiner;
+  gross/net PnL and same-path break-even per-side/round-trip cost budgets in backtest
+  metrics, console output and saved research summaries. No profitability claim.
+
+### Fixed
+
+- Overflow in CAGR annualisation on short profitable S1 samples no longer crashes
+  reporting; it remains an unreliable statistic for such short windows.
+
 ## [2.0.0] - 2026-09-28
 
 Aurum v2 is a ground-up rebuild of this repository as the `aurum` Python package, a

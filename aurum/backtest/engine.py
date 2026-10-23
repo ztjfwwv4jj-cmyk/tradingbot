@@ -307,6 +307,7 @@ def _simulate(
     meta: dict[str, Any],
     financing: FinancingSpec = None,
     rates: RateSource = None,
+    exit_at_close: bool = False,
 ) -> BacktestResult:
     """Shared bar loop for :func:`run_backtest` and :func:`run_target_lots`.
 
@@ -458,7 +459,7 @@ def _simulate(
                     tp_dist = _positive_or_none(take_profit_atr_mult * a)
 
         res = sim.step(approved, stop_price=stop_lvl, take_profit=tp_lvl, reason=step_reason,
-                       stop_distance=stop_dist, take_profit_distance=tp_dist)
+                       stop_distance=stop_dist, take_profit_distance=tp_dist, exit_at_close=exit_at_close)
         if protective:
             if res.position == 0.0:
                 stop_lvl = tp_lvl = None
@@ -489,6 +490,7 @@ def _simulate(
         "n_risk_events": len(risk_rows),
         "n_risk_clamped": n_clamped,
         "timeframe": bars_full.attrs.get("timeframe"),
+        "exit_at_close": exit_at_close,
     })
     result.meta.update(meta)
     if compute_metrics:
@@ -520,6 +522,7 @@ def run_backtest(
     hook_every: int = 1,
     financing: FinancingSpec = None,
     rates: RateSource = None,
+    exit_at_close: bool = False,
 ) -> BacktestResult:
     """Backtest a forecast series through sizer, risk manager and the execution simulator.
 
@@ -539,6 +542,8 @@ def run_backtest(
         ``take_profit_atr_mult`` likewise for a take-profit (``entry +/- k * ATR[t]``).
     stop_cooldown_bars : after a stop-out, block re-entry in the same direction for this many
         decisions (recorded as ``stop_cooldown`` risk events). 0 = re-enter immediately.
+    exit_at_close : opt-in offline one-bar round trips. Close any remaining position at
+        each execution bar's close, paying exit costs even for unchanged signals.
     start, end : inclusive window (bar positions or timestamps). Inputs are computed on the
         full history first, so the window starts with warmed-up vol/ATR.
     forecast_hook : optional ``hook(bar_index, decision_time, forecast, state) -> forecast``
@@ -621,7 +626,7 @@ def run_backtest(
         take_profit_atr_mult=take_profit_atr_mult, atr_period=atr_period,
         stop_cooldown_bars=stop_cooldown_bars, start=start, end=end, bars_per_year=bars_per_year,
         event_horizon_hours=event_horizon_hours, compute_metrics=compute_metrics,
-        meta=meta, financing=financing, rates=rates,
+        meta=meta, financing=financing, rates=rates, exit_at_close=exit_at_close,
     )
     if forecast_hook is not None:
         result.meta["hook"] = {"hook": repr(forecast_hook), "every": int(hook_every), **hook_stats}
