@@ -75,3 +75,32 @@ test("public candles reject missing seconds, invalid quotes and impossible taker
   assert.throws(() => validateRows([bad], 0, 1000), /taker volume/);
   assert.throws(() => forecasts(fixture(), "unknown"), /unknown/);
 });
+
+test("holding cohorts keep identical entry counts and cap gross rather than just net exposure", () => {
+  const { HOLDINGS, simulateHolding } = require("../scripts/one_second_holding.cjs");
+  const bars = fixture(240), fc = forecasts(bars, "close_return");
+  for (const h of HOLDINGS) {
+    const r = simulateHolding(bars, fc, h, 10);
+    assert.equal(r.n_trades, 240 - 8 - 60);
+    assert(Math.abs(r.max_gross_units - 1) < 1e-9);
+    assert.equal(r.units_per_entry, 1 / h);
+    assert(Math.abs(r.net_pnl - (r.gross_pnl - r.spread - r.slippage - r.commission)) < 1e-9);
+    assert.equal(simulateHolding(bars, fc, h, 10, 1).n_trades, r.n_trades - 1);
+  }
+});
+
+test("flat-price overlapping cohorts charge both sides without netting and liquidate every trade", () => {
+  const { HOLDINGS, simulateHolding, interval } = require("../scripts/one_second_holding.cjs");
+  const bars = Array.from({ length: 240 }, (_, i) => ({
+    time: i * 1000, o: 100, h: 100, l: 100, c: 100, volume: 10, buy: 5,
+  }));
+  const fc = bars.map((_, i) => i % 2 ? 1 : -1);
+  for (const h of HOLDINGS) {
+    const r = simulateHolding(bars, fc, h, 10);
+    assert.equal(r.gross_pnl, 0);
+    const cost = r.n_trades * (0.01 + 0.002 + 0.2) / h;
+    assert(Math.abs(r.net_pnl + cost) < 1e-9);
+    assert(Math.abs(r.net_bps_per_gross_unit_second + 21.2 / h) < 1e-9);
+    assert.deepEqual(interval([[r, r]]), [0, 0]);
+  }
+});
