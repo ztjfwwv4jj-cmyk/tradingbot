@@ -140,7 +140,7 @@ class ReplayFeed:
         tf = timeframe or bars.attrs.get("timeframe")
         if tf is None:
             minutes = index_bar_minutes(pd.DatetimeIndex(bars.index))
-            tf = next((t.name for t in map(get_timeframe, ("M1", "M5", "M15", "M30", "H1", "H4", "D1"))
+            tf = next((t.name for t in map(get_timeframe, ("S1", "M1", "M5", "M15", "M30", "H1", "H4", "D1"))
                        if t.minutes == minutes), None)
             if tf is None:
                 raise ValueError(f"cannot infer a timeframe from a {minutes}-minute spacing")

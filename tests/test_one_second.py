@@ -67,8 +67,13 @@ def test_signal_is_causal_and_zero_policy_explicit(mode, flat):
 
 
 def test_timeframe_and_gaps_are_not_silently_reinterpreted():
+    from aurum.live.paper import ReplayFeed
+
     bars = bars_from_close([100, 101, 102, 103])
     assert get_timeframe("S1").delta == pd.Timedelta(seconds=1)
+    no_attrs = bars.copy()
+    no_attrs.attrs.clear()
+    assert ReplayFeed(no_attrs).timeframe == "S1"
     with pytest.raises(ValueError, match="contiguous"):
         get_strategy("one_second").generate(MarketData(bars.drop(bars.index[2])))
     minute = bars_from_close([100, 101, 102], timeframe="M1")
