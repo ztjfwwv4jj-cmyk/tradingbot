@@ -316,7 +316,9 @@ class IntradaySeasonality(Strategy):
         rng = np.where(np.isfinite(rng) & (rng >= 0), rng, 0.0)
         comm = cm.commission_per_lot if cm.commission_per_lot is not None else XAUUSD.commission_per_lot
         per_side = 0.5 * eff + cm.slippage_fixed + cm.slippage_range_frac * rng
-        per_side_next = pd.Series(per_side, index=bars.index).shift(-1) + float(comm) / XAUUSD.contract_size
+        per_side = per_side + float(comm) / XAUUSD.contract_size
+        per_side = per_side + bars["open"].to_numpy(dtype=float) * cm.commission_bps / 10_000
+        per_side_next = pd.Series(per_side, index=bars.index).shift(-1)
         cost = safe_div(per_side_next / bars["close"].astype(float), sigma)
         frame = pd.DataFrame({"key": keys, "y": y.to_numpy(), "cost": np.asarray(cost, dtype=float)},
                              index=bars.index)

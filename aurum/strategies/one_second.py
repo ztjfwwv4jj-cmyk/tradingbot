@@ -10,6 +10,7 @@ import pandas as pd
 from aurum.core.types import MarketData
 from aurum.data.schema import validate_bars
 from aurum.strategies.base import Strategy, register_strategy
+from aurum.strategies.trend import check_params
 
 
 @register_strategy
@@ -19,6 +20,7 @@ class OneSecondMomentum(Strategy):
 
     def __init__(self, **params: Any) -> None:
         super().__init__(**params)
+        check_params(self)
         if self.params["mode"] not in ("momentum", "reversion"):
             raise ValueError("one_second mode must be momentum or reversion")
         if not isinstance(self.params["flat_on_zero"], bool):

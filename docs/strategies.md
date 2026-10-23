@@ -160,6 +160,117 @@ the local pandas binaries; they are an independent arithmetic study, **not a cla
 the Python simulator was locally executed**. The Python implementation has separate
 deterministic accounting and causality tests.
 
+### Chronological edge-improvement experiments
+
+Two subsequent protocols were **committed before downloading their test windows**.
+Neither changes the strategy, sample configuration, live safety gates or every-candle
+mode. Replacing the one-second rule with a test-set winner is not justified by these
+results. Reproducible, dependency-free Node research scripts are included:
+
+```powershell
+node --test tests\one_second_edge.test.cjs
+node scripts\one_second_edge.cjs --out runs\s1_edge_v1
+node scripts\one_second_holding.cjs --out runs\s1_holding_v1 --signal-run runs\s1_edge_v1
+```
+
+Use Node 22 or newer. Outputs include the frozen protocol, pre-test `selection.json`,
+raw public candles with SHA-256 provenance, every candidate's train/validation/test
+scores and paired intervals. The scripts refuse to reuse an opened test/selection;
+running a modified protocol on previously viewed test data would be a new exploratory
+analysis, **not** another untouched holdout. All public downloads are completed,
+contiguous S1 candles. These scripts never instantiate a broker or touch MT5.
+
+**Causal signal experiment.** Fixed candidates were the existing one-second close-return
+sign, candle-body sign, close-in-range sign, 4- and 8-second momentum, EWMA log-return
+(alpha 0.5), taker-buy-minus-sell volume sign, and the sign of the sum of close-return,
+body and taker-imbalance signs. Zero scores carry the previous direction, initially
+long: **all candidates enter every second**, with no filters. The common eight-bar
+warm-up avoids comparing different start dates. Taker volume comes directly from the
+completed public candle, not a future order book snapshot.
+
+For BTC/ETH/SOL, train was **Oct 15 10:00-16:00 UTC**, validation was **Oct 21
+10:00-16:00**, and test was **Oct 22 10:00-16:00**, totalling **194,400 previously unused
+candles**. Training ranked all eight fixed candidates by equal-symbol net bps per trade
+at 10 bps commission per side. Only its winner could advance, and only if validation
+beat the baseline at both zero and one extra second of execution delay. Selection was
+written before any test download; the runner-up was not tried after a failed gate.
+
+| Signal | Train net bps/trade | Validation | Test |
+|---|---:|---:|---:|
+| Close return (baseline) | -21.0949 | -21.1185 | -21.1357 |
+| Body | -21.1075 | -21.1243 | -21.1423 |
+| Close location | -21.1042 | -21.1225 | -21.1416 |
+| Momentum 4 | -21.1316 | -21.1430 | -21.1578 |
+| Momentum 8 | -21.1659 | -21.1600 | -21.1671 |
+| EWMA return | -21.1180 | -21.1288 | -21.1400 |
+| Taker imbalance | -21.1235 | -21.1345 | -21.1437 |
+| Candle/flow vote | -21.1016 | -21.1233 | -21.1369 |
+
+The **baseline won training**; no directional replacement was promoted. All
+**432** signal/phase/symbol/fee/delay scenarios lost net, including zero-commission
+cases under the same full 1 bp spread and 0.1 bp-per-side plus 2%-of-range slippage.
+One base unit, independent entry and exit fees, and identical timestamps were used
+throughout. The extra-second baseline test score was -21.1777 bps/trade. These are
+trade-notional-normalised arithmetic scores, not portfolio or annualised returns.
+
+**Holding-cost experiment, without skipping entries.** A second frozen protocol used
+the same train/validation data and a **different, previously unopened test hour:
+Oct 22 16:00-17:00 UTC**, adding 10,800 candles. It tested holdings of 1, 5, 15 and
+60 seconds. At holding H, a new **1/H-unit cohort enters every second** and exits after
+H seconds; up to H cohorts coexist, with total **gross** exposure capped at one base
+unit, not merely net exposure. Opposing cohorts pay their own entry/exit costs; there
+is no free internal netting, leverage increase, maker-fill assumption or reduced fee.
+This changes holding time and per-entry size, not entry cadence.
+
+Every holding used the same fully liquidated entry set, including 59 trailing seconds
+reserved for terminal exits. At zero extra delay there were 3,532 entries **per symbol
+for every holding**. The primary score is net bps per unit of gross notional-time:
+each entry's net PnL divided by its entry mid notional times holding seconds, then
+averaged equally over entries and symbols. This avoids presenting fewer small-dollar
+orders as a better directional signal. Aggregate gross exposure never exceeds one
+base unit; continuous fractional sizes are assumed in this independent study.
+
+| Holding seconds | Train net score | Validation net score | Test net score |
+|---|---:|---:|---:|
+| 1 | -21.0948 | -21.1184 | -21.1165 |
+| 5 | -4.1866 | -4.2020 | -4.1999 |
+| 15 | -1.3986 | -1.3953 | -1.3966 |
+| 60 | -0.3520 | -0.3478 | -0.3470 |
+
+Train selected H=60; validation confirmed improvement at both delays and froze it
+before the new test hour. Its held-out difference versus H=1 was **+20.7695** bps per
+gross-unit-second, with paired 300-second-block bootstrap interval
+**[20.7469, 20.7902]** (2,000 seeded replicates). With one extra second of delay,
+baseline was -21.1581 versus -0.3484 for H=60, a difference of +20.8098
+([20.7897, 20.8272]). Modeled negative drift was about **98.4% lower**, predominantly
+because the same gross exposure buys about 60 times less turnover per second.
+It is **loss reduction, not a positive edge**. All **216** holding scenarios still
+lost net, including zero-commission scenarios. Per-symbol test scores for H=60
+were -0.3452 BTC, -0.3475 ETH and -0.3482 SOL at 10 bps/side.
+
+Neither a one-hour holding test nor these unadjusted descriptive intervals establish
+profitability. Overlapping returns remain dependent across bootstrap boundaries.
+The holding study does not model aggregate mark-to-market drawdowns, funding, borrow,
+lot rounding, margin or aggregate risk-manager intervention. It is deliberately
+**not wired into the Python strategy/backtest or enabled by default**: the existing
+single-net-position engine cannot represent opposing cohorts simply by netting
+targets without understating costs and gross exposure. Enabling a cohort executor
+would require explicit gross-book risk/accounting and runtime validation first.
+The Python runtime and GitHub CI registration blockers described in the PR remain
+unresolved; the Node study is not evidence that the Python engine was executed.
+
+No tested directional change improved on the baseline, and no tested holding was
+net-profitable. If a positive-edge search is to rely on selective, cost-aware entry,
+**relaxing the every-candle requirement is a user decision**, not an implicit filter
+added to this strategy. Nothing in these experiments enables real-money trading.
+
+For the existing one-bar executor, combiner training also honors `exit_at_close`:
+labels use the next candle's open-to-close return (excluding gaps), and even unchanged
+nonzero forecasts pay estimated entry and exit costs every candle. Open prices are
+required in this mode. Desk replay propagates the same setting to both comparison
+books. These are cost-consistency corrections, not evidence of a profitable signal;
+training cost inputs remain execution estimates rather than guaranteed fills.
+
 ## The forecast contract
 
 The contract is defined in `aurum/strategies/base.py` and enforced by the test suite.

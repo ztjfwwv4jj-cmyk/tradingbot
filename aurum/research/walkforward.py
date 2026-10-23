@@ -578,8 +578,11 @@ def _cost_kwargs(cfg: AurumConfig, bars: pd.DataFrame | None) -> dict[str, Any]:
     bars (spread, high/low; the combiner restricts them to the forecasts' own rows), the SAME
     cost model and instrument the backtests use."""
     if bars is None:
+        if cfg.backtest.exit_at_close:
+            raise ValueError("exit_at_close combiner fitting requires bars with open prices")
         return {}
-    return {"bars": bars, "costs": cfg.costs.build(), "instrument": cfg.instrument.build()}
+    return {"bars": bars, "costs": cfg.costs.build(), "instrument": cfg.instrument.build(),
+            "exit_at_close": cfg.backtest.exit_at_close}
 
 
 # ============================================================================================

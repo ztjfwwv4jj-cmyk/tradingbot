@@ -44,6 +44,23 @@ test("entry lag, round-trip costs and exact net accounting are explicit", () => 
   assert(Math.abs(r.commission - (201 + 199 + 199) * 0.001) < 1e-12);
   assert(Math.abs(r.net_pnl - (r.gross_pnl - r.spread - r.slippage - r.commission)) < 1e-12);
   assert.equal(simulate(bars, fc, 10, 1).gross_pnl, 0);
+  assert.throws(() => simulate(bars.slice(0, 8), fc.slice(0, 8), 10), /common warmup/);
+});
+
+test("candidate features have hand-calculated directions, including ties and EWMA state", () => {
+  const bars = Array.from({ length: 12 }, (_, i) => ({
+    time: i * 1000, o: 100, h: 101, l: 99, c: 100, volume: 10, buy: 5,
+  }));
+  bars[8] = { ...bars[8], o: 100, h: 103, l: 99, c: 102, buy: 8 };
+  bars[9] = { ...bars[9], o: 103, h: 104, l: 100, c: 101, buy: 2 };
+  bars[10] = { ...bars[10], o: 100, h: 104, l: 99, c: 101, buy: 5 };
+  bars[11] = { ...bars[11], o: 101, h: 102, l: 97, c: 98, buy: 2 };
+  const expected = {
+    close_return: [1, -1, -1, -1], body: [1, -1, 1, -1],
+    close_location: [1, -1, -1, -1], momentum_4: [1, 1, 1, -1], momentum_8: [1, 1, 1, -1],
+    ewma_return: [1, 1, 1, -1], taker_imbalance: [1, -1, -1, -1], candle_flow: [1, -1, 1, -1],
+  };
+  for (const signal of SIGNALS) assert.deepEqual(forecasts(bars, signal).slice(8), expected[signal]);
 });
 
 test("validation failure retains baseline without testing runner-up selection", () => {
@@ -103,4 +120,16 @@ test("flat-price overlapping cohorts charge both sides without netting and liqui
     assert(Math.abs(r.net_bps_per_gross_unit_second + 21.2 / h) < 1e-9);
     assert.deepEqual(interval([[r, r]]), [0, 0]);
   }
+});
+
+test("holding selection requires validation improvement at both delays", () => {
+  const { evaluate: evaluateHolding, select: selectHolding } = require("../scripts/one_second_holding.cjs");
+  const data = new Map([["BTCUSDT", fixture(240)]]);
+  const tr = evaluateHolding(data), va = evaluateHolding(data);
+  for (const row of tr.rows) if (row.holding_bars === 60) row.net_bps_per_gross_unit_second = 100;
+  for (const row of va.rows) if (row.holding_bars === 60)
+    row.net_bps_per_gross_unit_second = row.extra_delay_bars ? -100 : 100;
+  assert.equal(selectHolding(tr, va).frozen_holding, 1);
+  for (const row of va.rows) if (row.holding_bars === 60) row.net_bps_per_gross_unit_second = 100;
+  assert.equal(selectHolding(tr, va).frozen_holding, 60);
 });

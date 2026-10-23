@@ -131,10 +131,11 @@ def test_dp_orbit_pays_for_its_costs_and_trades_less(seed: int) -> None:
 # ---------------------------------------------------------------------------------------
 # cost estimate from TRAINING bars
 # ---------------------------------------------------------------------------------------
-def test_training_cost_matches_cost_model() -> None:
+@pytest.mark.parametrize("commission_bps", [0.0, 10.0])
+def test_training_cost_matches_cost_model(commission_bps: float) -> None:
     bars = _planted_bars(3000, 1, {}, spread=0.05)            # below min_spread -> floored
     costs = {"min_spread": 0.10, "slippage_fixed": 0.03, "slippage_range_frac": 0.05,
-             "commission_per_lot": 3.5}
+             "commission_per_lot": 3.5, "commission_bps": commission_bps}
     s = IntradaySeasonality(costs=costs)
     tt = s.training_targets(_md(bars))
     cm = CostModel(**costs)
@@ -143,9 +144,12 @@ def test_training_cost_matches_cost_model() -> None:
     t = 2000
     nxt = bars.iloc[t + 1]
     per_side = (0.5 * cm.effective_spread(nxt["spread"]) + cm.slippage(nxt["high"] - nxt["low"], 0.0)
-                + 3.5 / 100.0)
+                + 3.5 / 100.0 + nxt["open"] * commission_bps / 10_000)
     assert tt.loc[bars.index[t], "cost"] == pytest.approx(per_side / bars["close"].iloc[t] / sigma.iloc[t])
     assert (tt["cost"] > 0).all()
+    if commission_bps:
+        zero = IntradaySeasonality(costs={**costs, "commission_bps": 0.0}).training_targets(_md(bars))
+        assert (tt["cost"] > zero["cost"]).all()
 
 
 # ---------------------------------------------------------------------------------------

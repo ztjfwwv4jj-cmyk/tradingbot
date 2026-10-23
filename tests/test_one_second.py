@@ -86,7 +86,7 @@ def test_timeframe_and_gaps_are_not_silently_reinterpreted():
     assert (minute["available_at"] - minute.index).eq(pd.Timedelta(minutes=1)).all()
 
 
-@pytest.mark.parametrize("params", [{"mode": "predict"}, {"flat_on_zero": 1}])
+@pytest.mark.parametrize("params", [{"mode": "predict"}, {"flat_on_zero": 1}, {"flat_on_zeor": False}])
 def test_invalid_strategy_params(params):
     with pytest.raises(ValueError):
         get_strategy("one_second", **params)

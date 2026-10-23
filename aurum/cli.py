@@ -625,6 +625,7 @@ def cmd_desk_replay(args: argparse.Namespace) -> int:
                   initial_equity=b.initial_equity, stop_atr_mult=b.stop_atr_mult,
                   take_profit_atr_mult=b.take_profit_atr_mult, atr_period=b.atr_period,
                   stop_cooldown_bars=b.stop_cooldown_bars, event_horizon_hours=b.event_horizon_hours,
+                  exit_at_close=b.exit_at_close,
                   start=s0, end=s1)
     t0 = time.time()
     # hook at EVERY bar: the desk is consulted every `every` bars, its policy applied at each bar

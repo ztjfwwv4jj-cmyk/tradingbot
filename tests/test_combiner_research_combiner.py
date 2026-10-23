@@ -87,6 +87,42 @@ def test_net_streams_charge_turnover(world):
     assert drag["churn"] > 5 * drag["slow_skill"]
 
 
+def test_forced_round_trips_charge_constant_forecasts_and_exclude_overnight_gaps(world):
+    bars, _ = world
+    gap_scale = pd.Series(np.where(np.arange(len(bars)) % 11 == 0, 1.02, 1.0), index=bars.index)
+    bars = bars.mul(gap_scale, axis=0)
+    fc = pd.DataFrame({"constant": 0.5}, index=bars.index)
+    comb = ForecastCombiner()
+    gross = comb.unit_vol_streams(fc, bars["close"], bars=bars, exit_at_close=True)
+    net = comb.unit_vol_streams(fc, bars["close"], bars=bars, exit_at_close=True, cost_per_turnover=0.05)
+    pd.testing.assert_frame_equal(net, gross - 0.05)  # two sides * abs(0.5), EVERY valid candle
+    _, _, vol = comb._checked(fc, bars["close"])
+    reference = 0.5 * np.log(bars["close"] / bars["open"]).shift(-1) / vol
+    np.testing.assert_allclose(gross["constant"], reference.loc[gross.index], rtol=1e-12)
+    held_gross = comb.unit_vol_streams(fc, bars["close"])
+    assert not np.allclose(gross["constant"], held_gross.loc[gross.index, "constant"])
+    held_net = comb.unit_vol_streams(fc, bars["close"], cost_per_turnover=0.05)
+    pd.testing.assert_frame_equal(held_net, held_gross)
+    fitted = comb.fit(fc, bars["close"], bars=bars, exit_at_close=True, cost_per_turnover=0.05)
+    assert fitted.train_turnover_["constant"] == pytest.approx(1.0)
+    assert "forced candle round trips" in fitted.explain()["cost_basis"]
+    with pytest.raises(ValueError, match="open prices"):
+        comb.unit_vol_streams(fc, bars["close"], exit_at_close=True)
+
+
+def test_research_forwards_forced_round_trip_cost_mode(world):
+    from aurum.core.config import load_config
+    from aurum.research.walkforward import _cost_kwargs
+
+    bars, _ = world
+    cfg = load_config({"backtest": {"exit_at_close": True}}, env={})
+    assert _cost_kwargs(cfg, bars)["exit_at_close"] is True
+    with pytest.raises(ValueError, match="open prices"):
+        _cost_kwargs(cfg, None)
+    cfg.backtest.exit_at_close = False
+    assert _cost_kwargs(cfg, bars)["exit_at_close"] is False
+
+
 def test_cost_derivation_matches_the_simulator():
     """sigma*_b * sum_t c_t |df_t| (the combiner's cost in equity units) ~= the spread +
     slippage + commission the ExecutionSimulator actually charges a vol-targeted book."""

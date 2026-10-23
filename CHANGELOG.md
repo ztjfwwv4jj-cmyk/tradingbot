@@ -10,6 +10,16 @@ commits and data hashes rather than to version numbers: see
 
 ### Added
 
+- Reproducible chronological S1 edge/holding research scripts with eight fixed causal
+  signals, frozen train/validation selection before a fresh test download, full candidate
+  reporting, identical realistic costs, and zero/one-second delay stress. No speculative
+  signal is promoted: the baseline ranked first and all 432 scenarios lost net.
+- Every-second overlapping-cohort holding study that caps gross exposure at one base unit
+  and charges both fills independently. Sixty-second holdings reduced modeled held-out
+  negative drift by about 98.4% versus one-second round trips, but all 216 holding scenarios
+  still lost net. This remains independent offline research, not a default strategy or
+  a cohort executor in the single-net-position Python simulator. Added runnable offline
+  Node causality, accounting, chronological-selection and gross-exposure tests.
 - S1 timeframe and registered `one_second` momentum/reversion experiment with explicit
   zero-return policy, one-bar warm-up and contiguous-data checks. Public paginated Binance
   spot 1s loader and `aurum data binance` preserve provenance, exclude unfinished bars and
@@ -24,6 +34,11 @@ commits and data hashes rather than to version numbers: see
 
 ### Fixed
 
+- Forced-candle execution costs now reach combiner fitting and desk/quant-only replay.
+  Fitting charges both sides of every nonzero candle forecast (including unchanged
+  signals) and uses next-open-to-close labels rather than crediting unheld gap returns.
+  Seasonality's training cost estimates include notional-bps fees; S1 parameters reject
+  misspellings instead of silently retaining defaults.
 - Overflow in CAGR annualisation on short profitable S1 samples no longer crashes
   reporting; it remains an unreliable statistic for such short windows.
 

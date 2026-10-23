@@ -105,6 +105,7 @@ function simulate(bars, fc, feeBps, delay = 0) {
     gross += pricePnl; spread += 2 * half; slippage += 2 * slip; commission += fees;
     traded += entry + exit;
   }
+  if (!pnlBps.length) throw new Error("need completed candles after the common warmup and delay");
   const net = gross - spread - slippage - commission;
   return {
     n_trades: pnlBps.length, gross_pnl: gross, net_pnl: net, spread, slippage, commission,

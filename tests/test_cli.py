@@ -210,11 +210,13 @@ def test_desk_replay_needs_confirmation(capsys, env, monkeypatch):
     assert code == EXIT_USAGE and "ANTHROPIC_API_KEY" in err
 
 
-def test_desk_replay_fake_client_through_same_risk(capsys, env, tmp_path):
+@pytest.mark.parametrize("exit_at_close", [False, True])
+def test_desk_replay_fake_client_through_same_risk(capsys, env, tmp_path, exit_at_close):
     idx = env["bars"].index
     out_dir = tmp_path / "replay"
     code, out, err = run(capsys, "desk", "replay", "--config", env["config"], "--start", str(idx[4000]),
                          "--end", str(idx[4239]), "--every", "24", "--fake", "--yes", "--out", str(out_dir),
+                         "--set", f"backtest.exit_at_close={str(exit_at_close).lower()}",
                          "--journal-dir", str(tmp_path / "journal"))
     assert code == EXIT_OK, err
     assert "OFFLINE FAKE CLIENT" in out and "quant_only" in out
@@ -231,6 +233,16 @@ def test_desk_replay_fake_client_through_same_risk(capsys, env, tmp_path):
     ts = pd.read_parquet(out_dir / "books" / "desk" / "timeseries.parquet")
     q = pd.read_parquet(out_dir / "books" / "quant_only" / "timeseries.parquet")
     assert (ts["positions"].abs() <= q["positions"].abs().max() + 1e-9).all()
+    for name in ("desk", "quant_only"):
+        folder = out_dir / "books" / name
+        meta = json.loads((folder / "meta.json").read_text())
+        assert meta["exit_at_close"] is exit_at_close
+        if exit_at_close:
+            frame = pd.read_parquet(folder / "timeseries.parquet")
+            assert frame["position_close"].eq(0).all()
+            fills = pd.read_csv(folder / "fills.csv")
+            if not fills.empty:
+                assert "bar_close" in set(fills["kind"])
 
 
 def test_desk_replay_budget_cap(capsys, env, tmp_path):
